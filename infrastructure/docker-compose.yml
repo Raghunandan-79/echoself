@@ -1,0 +1,55 @@
+# Local development infrastructure for EchoSelf.
+# Neon/Upstash/R2 are managed free-tier services used in deployed mode;
+# these containers are only for local development.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: echoself-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: echoself
+      POSTGRES_PASSWORD: echoself
+      POSTGRES_DB: echoself
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U echoself -d echoself"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: echoself-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Uncomment for fully-containerized dev (API still needs DATABASE_URL etc.):
+  # api:
+  #   build:
+  #     context: ..
+  #     dockerfile: apps/api/Dockerfile
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   environment:
+  #     DATABASE_URL: postgresql://echoself:echoself@postgres:5432/echoself
+  #     REDIS_URL: redis://redis:6379
+  #   ports:
+  #     - "4000:4000"
+
+volumes:
+  pgdata:
+  redisdata:

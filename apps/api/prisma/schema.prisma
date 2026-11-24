@@ -1,0 +1,260 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum JobState {
+  PENDING
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum JobType {
+  SPEECH
+  VIDEO
+  MEDIA
+}
+
+enum AssetStatus {
+  PENDING_UPLOAD
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+  DELETED
+}
+
+enum ProfileStatus {
+  ACTIVE
+  PENDING
+  DISABLED
+  DELETED
+}
+
+enum ConsentScope {
+  voice_cloning
+  face_animation
+  biometric_storage
+  external_processing
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  deletedAt    DateTime?
+
+  sessions      Session[]
+  consents      Consent[]
+  voiceProfiles VoiceProfile[]
+  faceProfiles  FaceProfile[]
+  assets        Asset[]
+  jobs          GenerationJob[]
+  conversations Conversation[]
+  auditLogs     AuditLog[]
+  passwordResetTokens PasswordResetToken[]
+
+  @@index([email])
+  @@map("users")
+}
+
+model Session {
+  id           String   @id @default(uuid()) @db.Uuid
+  userId       String   @db.Uuid
+  refreshHash  String   @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Consent {
+  id        String       @id @default(uuid()) @db.Uuid
+  userId    String       @db.Uuid
+  scope     ConsentScope
+  version   String
+  granted   Boolean
+  createdAt DateTime     @default(now())
+  revokedAt DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scope])
+  @@map("consents")
+}
+
+model VoiceProfile {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @db.Uuid
+  name              String
+  language          String?
+  status            ProfileStatus @default(PENDING)
+  referenceAssetId  String?       @db.Uuid
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user       User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reference  Asset? @relation("VoiceReference", fields: [referenceAssetId], references: [id], onDelete: SetNull)
+  jobs       GenerationJob[]
+
+  @@index([userId])
+  @@map("voice_profiles")
+}
+
+model FaceProfile {
+  id                String        @id @default(uuid()) @db.Uuid
+  userId            String        @db.Uuid
+  name              String
+  status            ProfileStatus @default(PENDING)
+  referenceAssetId  String?       @db.Uuid
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  user      User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  reference Asset? @relation("FaceReference", fields: [referenceAssetId], references: [id], onDelete: SetNull)
+  jobs      GenerationJob[]
+
+  @@index([userId])
+  @@map("face_profiles")
+}
+
+model Avatar {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String   @db.Uuid
+  name        String
+  voiceId     String?  @db.Uuid
+  faceId      String?  @db.Uuid
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId])
+  @@map("avatars")
+}
+
+model Asset {
+  id          String      @id @default(uuid()) @db.Uuid
+  userId      String      @db.Uuid
+  kind        String
+  objectKey   String      @unique
+  mimeType    String?
+  sizeBytes   BigInt?
+  status      AssetStatus @default(PENDING_UPLOAD)
+  metadata    Json?
+  parentId    String?     @db.Uuid
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  deletedAt   DateTime?
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent       Asset?        @relation("AssetDerivation", fields: [parentId], references: [id], onDelete: SetNull)
+  derived      Asset[]       @relation("AssetDerivation")
+  voiceRefs    VoiceProfile[] @relation("VoiceReference")
+  faceRefs     FaceProfile[]  @relation("FaceReference")
+  jobOutputs   GenerationJob[] @relation("JobOutput")
+
+  @@index([userId, kind])
+  @@index([status])
+  @@map("assets")
+}
+
+model GenerationJob {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @db.Uuid
+  type           JobType
+  state          JobState  @default(PENDING)
+  progress       Int       @default(0)
+  queueJobId     String?
+  idempotencyKey String?   @unique
+  voiceProfileId String?   @db.Uuid
+  faceProfileId  String?   @db.Uuid
+  input          Json
+  outputAssetId  String?   @db.Uuid
+  error          String?
+  attempts       Int       @default(0)
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  voiceProfile VoiceProfile? @relation(fields: [voiceProfileId], references: [id], onDelete: SetNull)
+  faceProfile  FaceProfile?  @relation(fields: [faceProfileId], references: [id], onDelete: SetNull)
+  outputAsset  Asset?        @relation("JobOutput", fields: [outputAssetId], references: [id], onDelete: SetNull)
+
+  @@index([userId, state])
+  @@index([state])
+  @@map("generation_jobs")
+}
+
+model Conversation {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  title     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@index([userId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @db.Uuid
+  role           String
+  content        String
+  createdAt      DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @db.Uuid
+  action    String
+  resource  String?
+  metadata  Json?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}
